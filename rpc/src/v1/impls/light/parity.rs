@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::collections::{BTreeMap, HashSet};
 use futures::{future, Future, BoxFuture};
 
-use util::RotatingLogger;
+use ethcore_logger::RotatingLogger;
 use util::misc::version_data;
 
 use crypto::ecies;
@@ -331,6 +331,15 @@ impl Parity for ParityClient {
 
 		Ok(ChainStatus {
 			block_gap: gap.map(|(x, y)| (x.into(), y.into())),
+		})
+	}
+
+	fn node_kind(&self) -> Result<::v1::types::NodeKind, Error> {
+		use ::v1::types::{NodeKind, Availability, Capability};
+
+		Ok(NodeKind {
+			availability: Availability::Personal,
+			capability: Capability::Light,
 		})
 	}
 }
