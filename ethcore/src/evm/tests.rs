@@ -20,6 +20,12 @@ use env_info::EnvInfo;
 use types::executed::CallType;
 use evm::{self, Ext, Schedule, Factory, GasLeft, VMType, ContractCreateResult, MessageCallResult, CreateContractAddress};
 use std::fmt::Debug;
+use tests::helpers::*;
+use types::transaction::SYSTEM_ADDRESS;
+use executive::Executive;
+use state::Substate;
+use trace::{NoopVMTracer, NoopTracer};
+use engines::DEFAULT_BLOCKHASH_CONTRACT;
 
 pub struct FakeLogEntry {
 	topics: Vec<H256>,
@@ -107,7 +113,7 @@ impl Ext for FakeExt {
 		Ok(self.balances[address])
 	}
 
-	fn blockhash(&self, number: &U256) -> H256 {
+	fn blockhash(&mut self, number: &U256) -> H256 {
 		self.blockhashes.get(number).unwrap_or(&H256::new()).clone()
 	}
 
@@ -428,6 +434,65 @@ fn test_blockhash(factory: super::Factory) {
 
 	assert_eq!(gas_left, U256::from(79_974));
 	assert_eq!(ext.store.get(&H256::new()).unwrap(), &blockhash);
+}
+
+evm_test!{test_blockhash_eip210: test_blockhash_eip210_jit, test_blockhash_eip210_int}
+fn test_blockhash_eip210(factory: super::Factory) {
+	let get_prev_hash_code = Arc::new("600143034060205260206020f3".from_hex().unwrap()); // this returns previous block hash
+	let get_prev_hash_code_hash = get_prev_hash_code.sha3();
+	let blockhash_contract_code = Arc::new(DEFAULT_BLOCKHASH_CONTRACT.from_hex().unwrap());
+	let blockhash_contract_code_hash = blockhash_contract_code.sha3();
+	let engine = TestEngine::new_metropolis();
+	let mut env_info = EnvInfo::default();
+
+	// populate state with 256 last hashes
+	let mut state = get_temp_state_with_factory(factory);
+	let contract_address: Address = 0xf0.into();
+	state.init_code(&contract_address, (*blockhash_contract_code).clone()).unwrap();
+	for i in 1 .. 257 {
+		env_info.number = i.into();
+		let params = ActionParams {
+			code_address: contract_address.clone(),
+			address: contract_address,
+			sender: SYSTEM_ADDRESS.clone(),
+			origin: SYSTEM_ADDRESS.clone(),
+			gas: 100000.into(),
+			gas_price: 0.into(),
+			value: ActionValue::Transfer(0.into()),
+			code: Some(blockhash_contract_code.clone()),
+			code_hash: blockhash_contract_code_hash,
+			data: Some(H256::from(i - 1).to_vec()),
+			call_type: CallType::Call,
+		};
+		let mut ex = Executive::new(&mut state, &env_info, &engine);
+		let mut substate = Substate::new();
+		let mut output = [];
+		if let Err(e) = ex.call(params, &mut substate, BytesRef::Fixed(&mut output), &mut NoopTracer, &mut NoopVMTracer) {
+			panic!("Encountered error on updating last hashes: {}", e);
+		}
+	}
+
+	env_info.number = 256;
+	let params = ActionParams {
+		code_address: Address::new(),
+		address: Address::new(),
+		sender: Address::new(),
+		origin: Address::new(),
+		gas: 100000.into(),
+		gas_price: 0.into(),
+		value: ActionValue::Transfer(0.into()),
+		code: Some(get_prev_hash_code),
+		code_hash: get_prev_hash_code_hash,
+		data: None,
+		call_type: CallType::Call,
+	};
+	let mut ex = Executive::new(&mut state, &env_info, &engine);
+	let mut substate = Substate::new();
+	let mut output = H256::new();
+	if let Err(e) = ex.call(params, &mut substate, BytesRef::Fixed(&mut output), &mut NoopTracer, &mut NoopVMTracer) {
+		panic!("Encountered error on getting last hash: {}", e);
+	}
+	assert_eq!(output, 255.into());
 }
 
 evm_test!{test_calldataload: test_calldataload_jit, test_calldataload_int}
