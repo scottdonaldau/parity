@@ -46,6 +46,9 @@ pub struct AuthorityRoundParams {
 	/// See main AuthorityRoundParams docs.
 	#[serde(rename="eip155Transition")]
 	pub eip155_transition: Option<Uint>,
+	/// Block from which monotonic steps start.
+	#[serde(rename="validateStepTransition")]
+	pub validate_step_transition: Option<Uint>,
 }
 
 /// Authority engine deserialization.
